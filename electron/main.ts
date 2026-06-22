@@ -828,6 +828,13 @@ app.whenReady().then(async () => {
     });
     installProviderContextMenu(contents);
 
+    // Route Ctrl+scroll zoom gestures on webviews through the existing zoom system
+    if (contents.getType?.() === 'webview') {
+      contents.on('zoom-changed', (_: any, zoomDirection: string) => {
+        sendShortcutPayload({ type: 'action', shortcutId: `browser-zoom-${zoomDirection}` });
+      });
+    }
+
     // For all web contents (including webviews)
     // Open all window.open() calls in external browser
     contents.setWindowOpenHandler((details: any) => {
