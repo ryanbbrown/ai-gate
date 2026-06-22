@@ -568,7 +568,7 @@ function createWindow() {
         callback({
           responseHeaders: {
             ...details.responseHeaders,
-            'Content-Security-Policy': "default-src 'self' 'unsafe-inline' 'unsafe-eval' *"
+            'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src * data:; connect-src *; font-src 'self' data:"
           }
         });
         return;
