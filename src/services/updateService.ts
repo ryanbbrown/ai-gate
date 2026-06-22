@@ -20,17 +20,6 @@ class UpdateService {
   private readonly CHECK_INTERVAL = 12 * 60 * 60 * 1000; // 12 hours in milliseconds
   private checkTimer: NodeJS.Timeout | null = null;
 
-  constructor() {
-    this.startPeriodicCheck();
-  }
-
-  private startPeriodicCheck(): void {
-    this.checkForUpdates();
-    
-    this.checkTimer = setInterval(() => {
-      this.checkForUpdates();
-    }, this.CHECK_INTERVAL);
-  }
 
   async checkForUpdates(): Promise<UpdateCheckResult> {
     try {
