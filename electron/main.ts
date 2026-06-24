@@ -121,7 +121,7 @@ const isMediaPermission = (permission: string) => {
   return ['media', 'audioCapture', 'videoCapture', 'microphone', 'camera'].includes(permission);
 };
 
-const BLOCKED_OPEN_SCHEMES = ['file:', 'javascript:', 'data:', 'about:', 'blob:'];
+const ALLOWED_OPEN_SCHEMES = ['http:', 'https:', 'mailto:'];
 
 /** Returns the native macOS media types implied by an Electron permission request. */
 const getNativeMediaTypes = (permission: string, details: any): Array<'microphone' | 'camera'> => {
@@ -573,7 +573,7 @@ function createWindow() {
 
   // Handle external links - open all in external browser
   mainWindow.webContents.setWindowOpenHandler(({ url }: { url: string }) => {
-    if (!BLOCKED_OPEN_SCHEMES.some(s => url.toLowerCase().startsWith(s))) shell.openExternal(url);
+    if (ALLOWED_OPEN_SCHEMES.some(s => url.toLowerCase().startsWith(s))) shell.openExternal(url);
     return { action: 'deny' };
   });
 
@@ -875,7 +875,7 @@ app.whenReady().then(async () => {
         };
       }
 
-      if (!BLOCKED_OPEN_SCHEMES.some(s => url.toLowerCase().startsWith(s))) shell.openExternal(url);
+      if (ALLOWED_OPEN_SCHEMES.some(s => url.toLowerCase().startsWith(s))) shell.openExternal(url);
       return { action: 'deny' };
     });
   });
