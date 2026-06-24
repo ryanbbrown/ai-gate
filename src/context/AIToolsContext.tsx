@@ -15,6 +15,7 @@ interface AIToolsContextType {
   addTool: (tool: AITool) => void;
   updateTool: (tool: AITool) => void;
   removeTool: (id: string) => void;
+  reorderTools: (fromIndex: number, toIndex: number) => void;
   selectTool: (tool: AITool, createNewInstance?: boolean) => void;
   setLayout: (layout: LayoutType) => void;
   closeToolInstance: (instanceId: string) => void;
@@ -31,7 +32,7 @@ interface AIToolsContextType {
   getActiveInstance: () => ToolInstance | undefined;
   // New panel management methods
   moveInstanceToPanel: (instanceId: string, targetPanelId: number, position?: number) => void;
-  reorderTabInPanel: (panelId: number, fromIndex: number, toIndex: number) => void;
+  reorderTabInPanel: (panelId: number, activeId: string, overId: string) => void;
   setActivePanelTab: (panelId: number, instanceId: string) => void;
   setActivePanel: (panelId: number) => void;
   duplicateInstance: (instanceId: string, targetPanelId?: number) => void;
@@ -222,6 +223,15 @@ export const AIToolsProvider = ({ children }: { children: React.ReactNode }) => 
     });
   };
 
+  const reorderTools = (fromIndex: number, toIndex: number) => {
+    setTools(current => {
+      const reordered = [...current];
+      const [moved] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+      return reordered;
+    });
+  };
+
   const selectTool = (tool: AITool) => {
     // Always create a new instance — multiple tabs of the same provider are intentional.
     // CRITICAL: Expand layout FIRST before calculating target panel
@@ -324,17 +334,34 @@ export const AIToolsProvider = ({ children }: { children: React.ReactNode }) => 
     const instance = toolInstances.find(inst => inst.id === instanceId);
     if (!instance) return;
 
+    // Auto-collapse layout when a panel becomes empty (mirror of expand in selectTool)
+    let panelIdRemap: Map<number, number> | null = null;
+    let collapseToLayout: LayoutType | null = null;
+
+    if (settings.autoLayout) {
+      const remaining = toolInstances.filter(inst => inst.id !== instanceId);
+      const nonEmptyPanelIds = [...new Set(remaining.map(inst => inst.panelId))].sort((a, b) => a - b);
+      const layoutNum = parseInt(layout);
+
+      if (nonEmptyPanelIds.length < layoutNum) {
+        const targetNum = Math.max(1, nonEmptyPanelIds.length) as 1 | 2 | 3;
+        collapseToLayout = String(targetNum) as LayoutType;
+        panelIdRemap = new Map(nonEmptyPanelIds.map((oldId, newIdx) => [oldId, newIdx]));
+      }
+    }
+
     setToolInstances(current => {
       const updated = current.filter(inst => inst.id !== instanceId);
       return updated.map((inst, index) => ({
         ...inst,
         position: index,
+        panelId: panelIdRemap ? (panelIdRemap.get(inst.panelId) ?? inst.panelId) : inst.panelId,
         positionInPanel: inst.panelId === instance.panelId && inst.positionInPanel > instance.positionInPanel
           ? inst.positionInPanel - 1
           : inst.positionInPanel,
       }));
     });
-    
+
     // Clean up activePanelTabs if the closed instance was active
     setActivePanelTabs(current => {
       const updated = { ...current };
@@ -348,7 +375,7 @@ export const AIToolsProvider = ({ children }: { children: React.ReactNode }) => 
           )].sort((a, b) => settings.syncedTabs ? a.position - b.position : a.positionInPanel - b.positionInPanel);
           const closedIndex = visibleInstances.findIndex(inst => inst.id === instanceId);
           const remainingInstances = visibleInstances.filter(inst => inst.id !== instanceId);
-          
+
           if (remainingInstances.length > 0) {
             const replacementIndex = Math.min(Math.max(closedIndex, 0), remainingInstances.length - 1);
             updated[panelId] = remainingInstances[replacementIndex].id;
@@ -358,8 +385,20 @@ export const AIToolsProvider = ({ children }: { children: React.ReactNode }) => 
           }
         }
       });
+
+      if (panelIdRemap) {
+        const remapped: Record<number, string> = {};
+        Object.entries(updated).forEach(([pid, tabId]) => {
+          const newPanelId = panelIdRemap!.get(parseInt(pid));
+          if (newPanelId !== undefined) remapped[newPanelId] = tabId;
+        });
+        return remapped;
+      }
+
       return updated;
     });
+
+    if (collapseToLayout) setLayoutState(collapseToLayout);
     
     setRecentlyClosed(prev => [instance, ...prev.slice(0, 4)]);
     
@@ -372,9 +411,50 @@ export const AIToolsProvider = ({ children }: { children: React.ReactNode }) => 
 
   const closeAllInstances = () => {
     const unpinnedInstances = toolInstances.filter(instance => !instance.isPinned);
-    setToolInstances(current => current.filter(instance => instance.isPinned));
+
+    // Auto-collapse: compute remap before state updates
+    let panelIdRemap: Map<number, number> | null = null;
+    let collapseToLayout: LayoutType | null = null;
+
+    if (settings.autoLayout) {
+      const pinned = toolInstances.filter(inst => inst.isPinned);
+      const nonEmptyPanelIds = [...new Set(pinned.map(inst => inst.panelId))].sort((a, b) => a - b);
+      const targetNum = Math.max(1, nonEmptyPanelIds.length);
+      if (targetNum < parseInt(layout)) {
+        collapseToLayout = String(targetNum) as LayoutType;
+        if (nonEmptyPanelIds.some((id, idx) => id !== idx)) {
+          panelIdRemap = new Map(nonEmptyPanelIds.map((oldId, newIdx) => [oldId, newIdx]));
+        }
+      }
+    }
+
+    setToolInstances(current => {
+      const pinned = current.filter(inst => inst.isPinned);
+      if (!panelIdRemap) return pinned;
+      return pinned.map(inst => ({
+        ...inst,
+        panelId: panelIdRemap!.get(inst.panelId) ?? inst.panelId,
+      }));
+    });
+
+    setActivePanelTabs(current => {
+      const pinnedIds = new Set(toolInstances.filter(i => i.isPinned).map(i => i.id));
+      const filtered: Record<number, string> = {};
+      Object.entries(current).forEach(([pid, tabId]) => {
+        if (pinnedIds.has(tabId)) filtered[parseInt(pid)] = tabId;
+      });
+      if (!panelIdRemap) return filtered;
+      const remapped: Record<number, string> = {};
+      Object.entries(filtered).forEach(([pid, tabId]) => {
+        const newPanelId = panelIdRemap!.get(parseInt(pid));
+        if (newPanelId !== undefined) remapped[newPanelId] = tabId;
+      });
+      return remapped;
+    });
+
     setRecentlyClosed(prev => [...unpinnedInstances, ...prev.slice(0, 5 - unpinnedInstances.length)]);
-    
+    if (collapseToLayout) setLayoutState(collapseToLayout);
+
     toast({
       title: "All Tabs Closed",
       description: `${unpinnedInstances.length} tabs closed.`,
@@ -386,12 +466,24 @@ export const AIToolsProvider = ({ children }: { children: React.ReactNode }) => 
     if (recentlyClosed.length === 0) return;
 
     const lastClosed = recentlyClosed[0];
-    setToolInstances(current => [...current, lastClosed]);
+    // Clamp panelId in case layout collapsed since the tab was closed
+    const layoutNum = parseInt(layout);
+    const safePanelId = Math.min(lastClosed.panelId, layoutNum - 1);
+    const instance = safePanelId !== lastClosed.panelId
+      ? { ...lastClosed, panelId: safePanelId }
+      : lastClosed;
+
+    setToolInstances(current => {
+      // Guard against rapid double-calls before state flushes — use fresh current
+      if (current.some(inst => inst.id === instance.id)) return current;
+      return [...current, instance];
+    });
+    setActivePanelTab(safePanelId, instance.id);
     setRecentlyClosed(prev => prev.slice(1));
 
     toast({
       title: "Tab Restored",
-      description: `${lastClosed.title} restored.`,
+      description: `${instance.title} restored.`,
       duration: 1500
     });
   };
@@ -554,18 +646,22 @@ export const AIToolsProvider = ({ children }: { children: React.ReactNode }) => 
     setActivePanelTab(targetPanelId, instanceId);
   };
 
-  const reorderTabInPanel = (panelId: number, fromIndex: number, toIndex: number) => {
+  const reorderTabInPanel = (panelId: number, activeId: string, overId: string) => {
     setToolInstances(current => {
       const panelInstances = current
         .filter(inst => inst.panelId === panelId)
         .sort((a, b) => a.positionInPanel - b.positionInPanel);
 
-      const [movedInstance] = panelInstances.splice(fromIndex, 1);
-      panelInstances.splice(toIndex, 0, movedInstance);
+      const fromIndex = panelInstances.findIndex(inst => inst.id === activeId);
+      const toIndex = panelInstances.findIndex(inst => inst.id === overId);
 
-      const updatedPositions = new Map(
-        panelInstances.map((inst, index) => [inst.id, index])
-      );
+      if (fromIndex === -1 || toIndex === -1) return current;
+
+      const reordered = [...panelInstances];
+      const [moved] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+
+      const updatedPositions = new Map(reordered.map((inst, index) => [inst.id, index]));
 
       return current.map(inst => {
         if (inst.panelId === panelId) {
@@ -748,6 +844,7 @@ export const AIToolsProvider = ({ children }: { children: React.ReactNode }) => 
     addTool,
     updateTool,
     removeTool,
+    reorderTools,
     selectTool,
     setLayout,
     closeToolInstance,

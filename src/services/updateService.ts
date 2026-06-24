@@ -17,20 +17,8 @@ class UpdateService {
   private readonly GITHUB_API_URL = `https://api.github.com/repos/${this.GITHUB_REPO}/releases/latest`;
   private readonly GITHUB_RELEASES_URL = `https://github.com/${this.GITHUB_REPO}/releases`;
   private readonly GITHUB_RAW_BASE_URL = `https://raw.githubusercontent.com/${this.GITHUB_REPO}/main/release_notes`;
-  private readonly CHECK_INTERVAL = 12 * 60 * 60 * 1000; // 12 hours in milliseconds
   private checkTimer: NodeJS.Timeout | null = null;
 
-  constructor() {
-    this.startPeriodicCheck();
-  }
-
-  private startPeriodicCheck(): void {
-    this.checkForUpdates();
-    
-    this.checkTimer = setInterval(() => {
-      this.checkForUpdates();
-    }, this.CHECK_INTERVAL);
-  }
 
   async checkForUpdates(): Promise<UpdateCheckResult> {
     try {
@@ -179,16 +167,6 @@ class UpdateService {
     }
 
     try {
-      if (typeof window !== 'undefined' && (window as any).openExternal) {
-        console.log('Using global openExternal function');
-        (window as any).openExternal(this.GITHUB_RELEASES_URL);
-      }
-    } catch (e) {
-      console.warn('global openExternal failed, will try window.open', e);
-    }
-
-    try {
-      console.log('Attempting window.open fallback');
       window.open(this.GITHUB_RELEASES_URL, '_blank', 'noopener,noreferrer');
     } catch (e) {
       console.warn('window.open fallback failed', e);

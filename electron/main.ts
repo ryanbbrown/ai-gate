@@ -121,6 +121,8 @@ const isMediaPermission = (permission: string) => {
   return ['media', 'audioCapture', 'videoCapture', 'microphone', 'camera'].includes(permission);
 };
 
+const ALLOWED_OPEN_SCHEMES = ['http:', 'https:', 'mailto:'];
+
 /** Returns the native macOS media types implied by an Electron permission request. */
 const getNativeMediaTypes = (permission: string, details: any): Array<'microphone' | 'camera'> => {
   const mediaTypes = new Set<'microphone' | 'camera'>();
@@ -179,6 +181,18 @@ const requestNativeMediaAccess = async (mediaTypes: Array<'microphone' | 'camera
 /** Configures persistent provider webviews to allow browser media prompts. */
 const configureProviderPermissions = (providerSession: any) => {
   providerSession.setPermissionCheckHandler((_webContents: any, permission: string, requestingOrigin: string, details: any) => {
+    if (permission.startsWith('clipboard')) {
+      const url = requestingOrigin || getPermissionRequestUrl(details);
+      if (permission === 'clipboard-read') {
+        // Read is sensitive: require a verifiable HTTPS origin so embedded third-party
+        // iframes with an empty or non-HTTP origin cannot silently read the clipboard.
+        return isHttpUrl(url);
+      }
+      // Write variants (clipboard-write, clipboard-sanitized-write): grant for HTTPS or
+      // empty origin (Electron webview quirk on some platforms). Session only serves
+      // user-configured HTTPS AI tool URLs so empty origin is safe to allow.
+      return url === '' || isHttpUrl(url);
+    }
     if (!isMediaPermission(permission)) return false;
 
     const requestUrl = requestingOrigin || getPermissionRequestUrl(details);
@@ -189,6 +203,11 @@ const configureProviderPermissions = (providerSession: any) => {
   });
 
   providerSession.setPermissionRequestHandler((_webContents: any, permission: string, callback: (granted: boolean) => void, details: any) => {
+    if (permission.startsWith('clipboard')) {
+      const url = getPermissionRequestUrl(details);
+      callback(permission === 'clipboard-read' ? isHttpUrl(url) : url === '' || isHttpUrl(url));
+      return;
+    }
     if (!isMediaPermission(permission)) {
       callback(false);
       return;
@@ -554,7 +573,7 @@ function createWindow() {
 
   // Handle external links - open all in external browser
   mainWindow.webContents.setWindowOpenHandler(({ url }: { url: string }) => {
-    shell.openExternal(url);
+    if (ALLOWED_OPEN_SCHEMES.some(s => url.toLowerCase().startsWith(s))) shell.openExternal(url);
     return { action: 'deny' };
   });
 
@@ -567,7 +586,7 @@ function createWindow() {
         callback({
           responseHeaders: {
             ...details.responseHeaders,
-            'Content-Security-Policy': "default-src 'self' 'unsafe-inline' 'unsafe-eval' *"
+            'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src * data:; connect-src *; font-src 'self' data:"
           }
         });
         return;
@@ -827,6 +846,13 @@ app.whenReady().then(async () => {
     });
     installProviderContextMenu(contents);
 
+    // Route Ctrl+scroll zoom gestures on webviews through the existing zoom system
+    if (contents.getType?.() === 'webview') {
+      contents.on('zoom-changed', (_: any, zoomDirection: string) => {
+        sendShortcutPayload({ type: 'action', shortcutId: `browser-zoom-${zoomDirection}` });
+      });
+    }
+
     // For all web contents (including webviews)
     // Open all window.open() calls in external browser
     contents.setWindowOpenHandler((details: any) => {
@@ -849,7 +875,7 @@ app.whenReady().then(async () => {
         };
       }
 
-      shell.openExternal(url);
+      if (ALLOWED_OPEN_SCHEMES.some(s => url.toLowerCase().startsWith(s))) shell.openExternal(url);
       return { action: 'deny' };
     });
   });

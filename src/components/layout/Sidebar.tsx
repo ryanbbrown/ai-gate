@@ -8,9 +8,23 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import { restrictToVerticalAxis, restrictToParentElement } from '@dnd-kit/modifiers';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import {
+  ChevronLeft,
+  ChevronRight,
   Heart,
   Layout,
   LayoutList,
@@ -24,6 +38,7 @@ import {
   Monitor,
   Download,
   Bell,
+  GripVertical,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getFaviconUrl } from '@/lib/favicon';
@@ -91,8 +106,150 @@ const ToolIcon = ({ url, icon }: { url: string; icon?: string }) => {
   );
 };
 
+interface SortableToolItemProps {
+  tool: AITool;
+  isCollapsed: boolean;
+  onSelect: (tool: AITool, newTab: boolean) => void;
+  onEdit: (tool: AITool, e: React.MouseEvent) => void;
+  onDelete: (tool: AITool, e: React.MouseEvent) => void;
+  onEditFromTooltip: (tool: AITool) => void;
+  onDeleteFromTooltip: (tool: AITool) => void;
+}
+
+const SortableToolItem = ({
+  tool,
+  isCollapsed,
+  onSelect,
+  onEdit,
+  onDelete,
+  onEditFromTooltip,
+  onDeleteFromTooltip,
+}: SortableToolItemProps) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tool.id });
+
+  const style = {
+    // eslint-disable-next-line react/forbid-component-props -- dnd-kit requires runtime transform/transition as inline styles
+    // 2D translate avoids GPU compositing layer promotion that conflicts with Electron webviews
+    transform: transform ? `translate(${Math.round(transform.x)}px, ${Math.round(transform.y)}px)` : undefined,
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+
+  return (
+    // eslint-disable-next-line react/forbid-component-props -- dnd-kit requires runtime transform/transition as inline styles
+    <div
+      ref={setNodeRef}
+      style={style}
+      // Collapsed: whole item is draggable — both attributes and listeners on container
+      {...(isCollapsed ? { ...attributes, ...listeners } : {})}
+      className={cn(
+        "group relative flex items-center rounded-md hover:bg-muted/50 transition-colors duration-150",
+        isCollapsed ? "justify-center p-2 cursor-grab active:cursor-grabbing" : "px-2 py-1.5",
+        isDragging && "bg-muted/50"
+      )}
+    >
+      {/* Drag handle — only shown when expanded */}
+      {!isCollapsed && (
+        <div
+          {...attributes}
+          {...listeners}
+          className="mr-1 opacity-0 group-hover:opacity-40 hover:!opacity-100 cursor-grab active:cursor-grabbing transition-opacity shrink-0"
+        >
+          <GripVertical className="h-3.5 w-3.5" />
+        </div>
+      )}
+
+      <Button
+        variant="ghost"
+        className={cn(
+          "w-full h-auto text-left justify-start p-2 font-normal",
+          isCollapsed && "justify-center p-0"
+        )}
+        onClick={(e) => onSelect(tool, e.ctrlKey || e.metaKey)}
+      >
+        <ToolIcon url={tool.url} icon={tool.icon} />
+        {!isCollapsed && (
+          <span className="ml-3 truncate">{tool.name}</span>
+        )}
+      </Button>
+
+      {/* Action buttons — visible on hover when expanded */}
+      {!isCollapsed && (
+        <div className="absolute right-2 flex opacity-0 group-hover:opacity-100 transition-opacity">
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={(e) => onEdit(tool, e)}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Edit Tool</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                  onClick={(e) => onDelete(tool, e)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Delete Tool</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+      )}
+
+      {/* Tool name + actions as tooltip when collapsed */}
+      {isCollapsed && (
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="sr-only">{tool.name}</span>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <div className="flex flex-col gap-1">
+                <p className="font-medium">{tool.name}</p>
+                <div className="flex gap-1 mt-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={(e) => { e.stopPropagation(); onEditFromTooltip(tool); }}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs text-destructive"
+                    onClick={(e) => { e.stopPropagation(); onDeleteFromTooltip(tool); }}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
+    </div>
+  );
+};
+
 export const Sidebar = () => {
-  const { tools, selectTool, layout, setLayout, removeTool } = useAITools();
+  const { tools, selectTool, layout, setLayout, removeTool, reorderTools } = useAITools();
   const { settings, updateSettings, toggleTheme } = useSettings();
   const { hasUpdate, showUpdatePopup } = useUpdate();
   const { unreadCount, setShowPanel } = useNotifications();
@@ -139,6 +296,18 @@ export const Sidebar = () => {
   const handleEdit = (tool: AITool, e: React.MouseEvent) => {
     e.stopPropagation();
     setToolToEdit(tool);
+  };
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const fromIndex = tools.findIndex(t => t.id === active.id);
+    const toIndex = tools.findIndex(t => t.id === over.id);
+    if (fromIndex !== -1 && toIndex !== -1) reorderTools(fromIndex, toIndex);
   };
 
   return (
@@ -201,109 +370,29 @@ export const Sidebar = () => {
 
           {/* Tools List */}
           <ScrollArea className="flex-1 -mx-1 px-1">
-            <div className="space-y-1 py-2">
-              {tools.map((tool) => (
-                <div 
-                  key={tool.id} 
-                  className={cn(
-                    "group relative flex items-center rounded-md hover:bg-muted/50 transition-colors duration-150",
-                    isCollapsed ? "justify-center p-2" : "px-2 py-1.5"
-                  )}
-                >
-                  <Button
-                    variant="ghost"
-                    className={cn(
-                      "w-full h-auto text-left justify-start p-2 font-normal",
-                      isCollapsed && "justify-center p-0"
-                    )}
-                    onClick={(e) => selectTool(tool, e.ctrlKey || e.metaKey)}
-                  >
-                    <ToolIcon url={tool.url} icon={tool.icon} />
-                    
-                    {!isCollapsed && (
-                      <span className="ml-3 truncate">{tool.name}</span>
-                    )}
-                  </Button>
-                  
-                  {/* Action buttons - visible on hover when expanded */}
-                  {!isCollapsed && (
-                    <div className="absolute right-2 flex opacity-0 group-hover:opacity-100 transition-opacity">
-                      <TooltipProvider delayDuration={300}>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="h-7 w-7"
-                              onClick={(e) => handleEdit(tool, e)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Edit Tool</TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                      
-                      <TooltipProvider delayDuration={300}>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-                              onClick={(e) => handleDelete(tool, e)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Delete Tool</TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </div>
-                  )}
-                  
-                  {/* Tool names as tooltips when collapsed */}
-                  {isCollapsed && (
-                    <TooltipProvider delayDuration={300}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="sr-only">{tool.name}</span>
-                        </TooltipTrigger>
-                        <TooltipContent side="right">
-                          <div className="flex flex-col gap-1">
-                            <p className="font-medium">{tool.name}</p>
-                            <div className="flex gap-1 mt-1">
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="h-6 px-2 text-xs"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setToolToEdit(tool);
-                                }}
-                              >
-                                Edit
-                              </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="h-6 px-2 text-xs text-destructive"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setToolToDelete(tool);
-                                }}
-                              >
-                                Delete
-                              </Button>
-                            </div>
-                          </div>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  )}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext items={tools.map(t => t.id)} strategy={verticalListSortingStrategy}>
+                <div className="space-y-1 py-2">
+                  {tools.map((tool) => (
+                    <SortableToolItem
+                      key={tool.id}
+                      tool={tool}
+                      isCollapsed={isCollapsed}
+                      onSelect={(t, newTab) => selectTool(t, newTab)}
+                      onEdit={handleEdit}
+                      onDelete={handleDelete}
+                      onEditFromTooltip={(t) => setToolToEdit(t)}
+                      onDeleteFromTooltip={(t) => setToolToDelete(t)}
+                    />
+                  ))}
                 </div>
-              ))}
-            </div>
+              </SortableContext>
+            </DndContext>
           </ScrollArea>
 
           {/* Footer */}

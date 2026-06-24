@@ -25,13 +25,6 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Add a helper function to open links from buttons that aren't actual anchor tags
-  (window as any).openExternal = (url: string) => {
-    if (typeof url === 'string' && (url.startsWith('http:') || url.startsWith('https:') || url.startsWith('mailto:'))) {
-      console.log('Opening external link via helper function:', url);
-      shell.openExternal(url);
-    }
-  };
 });
 
 // Expose IPC functions to the renderer process

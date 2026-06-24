@@ -5,7 +5,6 @@ import { ToolInstance, AITool } from '@/types/AITool';
 import { useAITools } from '@/context/AIToolsContext';
 import { useSettings } from '@/context/SettingsContext';
 import { useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 import { getFaviconUrl } from '@/lib/favicon';
 
 interface TabProps {
@@ -36,7 +35,8 @@ export const Tab = ({ instance, tool, isActive, onClose, panelId, tabNumber }: T
   });
 
   const style = {
-    transform: CSS.Transform.toString(transform),
+    // 2D translate avoids GPU compositing layer promotion that conflicts with Electron webviews
+    transform: transform ? `translate(${Math.round(transform.x)}px, 0px)` : undefined,
     transition,
     opacity: isDragging ? 0.5 : 1,
   };
@@ -93,7 +93,7 @@ export const Tab = ({ instance, tool, isActive, onClose, panelId, tabNumber }: T
       data-panel-id={panelId}
       data-active={isActive ? 'true' : 'false'}
       className={`
-        group relative flex items-center gap-2 px-3 py-2 min-w-[120px] max-w-[200px]
+        group relative flex items-center gap-2 px-3 py-2 flex-1 min-w-[80px] max-w-[200px]
         border-r border-border transition-all
         ${isActive
           ? 'bg-background text-foreground'

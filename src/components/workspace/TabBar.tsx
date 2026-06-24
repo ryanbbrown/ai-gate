@@ -1,6 +1,7 @@
 // src/components/workspace/TabBar.tsx
 import { ToolInstance } from '@/types/AITool';
 import { useAITools } from '@/context/AIToolsContext';
+import { useSettings } from '@/context/SettingsContext';
 import { Tab } from './Tab';
 import { ToolPicker } from './ToolPicker';
 import {
@@ -26,7 +27,8 @@ interface TabBarProps {
 }
 
 export const TabBar = ({ panelId, instances, activeInstanceId }: TabBarProps) => {
-  const { closeToolInstance, reorderTabInPanel, getToolById } = useAITools();
+  const { closeToolInstance, reorderTabInPanel, reorderInstances, getToolById } = useAITools();
+  const { settings } = useSettings();
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -43,11 +45,15 @@ export const TabBar = ({ panelId, instances, activeInstanceId }: TabBarProps) =>
     const { active, over } = event;
 
     if (over && active.id !== over.id) {
-      const oldIndex = instances.findIndex(inst => inst.id === active.id);
-      const newIndex = instances.findIndex(inst => inst.id === over.id);
-
-      if (oldIndex !== -1 && newIndex !== -1) {
-        reorderTabInPanel(panelId, oldIndex, newIndex);
+      if (settings.syncedTabs) {
+        // In synced mode, instances is the global toolInstances array; reorder by position in that array
+        const oldIndex = instances.findIndex(inst => inst.id === active.id);
+        const newIndex = instances.findIndex(inst => inst.id === over.id);
+        if (oldIndex !== -1 && newIndex !== -1) {
+          reorderInstances(oldIndex, newIndex);
+        }
+      } else {
+        reorderTabInPanel(panelId, active.id as string, over.id as string);
       }
     }
   };
@@ -55,7 +61,7 @@ export const TabBar = ({ panelId, instances, activeInstanceId }: TabBarProps) =>
   return (
     <div data-testid={`panel-${panelId}-tabbar`} className="flex items-center bg-secondary/20 border-b border-border">
       {/* Horizontal Scrollable Tab Container */}
-      <div className="flex-1 flex overflow-x-auto scrollbar-thin">
+      <div className="flex-1 flex overflow-x-auto scrollbar-thin min-w-0">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}

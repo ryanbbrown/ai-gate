@@ -1,5 +1,5 @@
 // src/components/workspace/WorkspaceGrid.tsx
-import { useRef, useState, useEffect, useLayoutEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useLayoutEffect } from 'react';
 import { useAITools } from '@/context/AIToolsContext';
 import { Panel } from './Panel';
 import { AIToolView } from './AIToolView';
@@ -28,12 +28,22 @@ export const WorkspaceGrid = () => {
   // Track which instances have ever been activated (for lazy webview creation)
   const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
 
-  // Callback refs for panels to register their content areas
-  const setContentRef = useCallback((panelId: number) => {
-    return (el: HTMLDivElement | null) => {
-      contentRefs.current[panelId] = el;
-    };
-  }, []);
+  // Incremented whenever a panel content ref element is replaced (e.g. empty↔non-empty
+  // transition swaps the DOM node), so useLayoutEffect re-observes the new element.
+  const [contentRefVersion, setContentRefVersion] = useState(0);
+
+  // Stable callback refs per panel — created once so they never invalidate as ref props.
+  // Using a factory pattern here would create a new function on every render, causing
+  // React to repeatedly call the old ref with null then the new ref with the element,
+  // triggering setContentRefVersion on every render → infinite loop.
+  const contentRefCallbacks = useRef([0, 1, 2].map(panelId =>
+    (el: HTMLDivElement | null) => {
+      if (contentRefs.current[panelId] !== el) {
+        contentRefs.current[panelId] = el;
+        setContentRefVersion(v => v + 1);
+      }
+    }
+  ));
 
   // Update visited IDs when active tabs change
   useEffect(() => {
@@ -107,7 +117,7 @@ export const WorkspaceGrid = () => {
     requestAnimationFrame(updateBounds);
 
     return () => observer.disconnect();
-  }, [layoutNumber]);
+  }, [layoutNumber, contentRefVersion]);
 
   const gridCols: Record<LayoutType, string> = {
     '1': 'grid-cols-1',
@@ -128,14 +138,14 @@ export const WorkspaceGrid = () => {
         {allPanels.map((panelId) => (
           <div
             key={panelId}
-            className="w-full h-full"
+            className="min-w-0 h-full"
             style={{
               display: panelId < layoutNumber ? 'block' : 'none'
             }}
           >
             <Panel
               panelId={panelId}
-              contentAreaRef={setContentRef(panelId)}
+              contentAreaRef={contentRefCallbacks.current[panelId]}
             />
           </div>
         ))}
