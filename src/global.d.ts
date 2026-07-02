@@ -12,9 +12,11 @@ interface Window {
       setShortcutRecordingActive: (isActive: boolean) => void;
       onShortcut: (cb: (payload: { type: string; shortcutId?: string }) => void) => () => void;
       openExternal: (url: string) => void;
+      getPopupAllowlistCount: () => Promise<number>;
+      clearPopupAllowlist: () => Promise<number>;
     };
   }
-  
+
   declare namespace JSX {
     interface IntrinsicElements {
       webview: React.DetailedHTMLProps<React.WebViewHTMLAttributes<HTMLElement>, HTMLElement> & {
@@ -24,12 +26,12 @@ interface Window {
       };
     }
   }
-  
+
   interface HTMLWebViewElement extends HTMLElement {
     reload: () => void;
     executeJavaScript: (code: string) => Promise<any>;
     src: string;
-    
+
     addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void;
     removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void;
   }
