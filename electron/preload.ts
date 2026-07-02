@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('shortcut', handler);
     return () => ipcRenderer.removeListener('shortcut', handler);
   },
+  getPopupAllowlistCount: () => ipcRenderer.invoke('get-popup-allowlist-count'),
+  clearPopupAllowlist: () => ipcRenderer.invoke('clear-popup-allowlist'),
   openExternal: (url: string) => {
     console.log('electronAPI.openExternal called with:', url);
     try {

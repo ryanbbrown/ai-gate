@@ -325,7 +325,9 @@ export const AIToolView = ({ tool, instance, isVisible, panelId }: AIToolViewPro
             data-panel-id={panelId ?? undefined}
             ref={webviewRef}
             className="w-full h-full"
-            allowpopups
+            // Pass the string "true" (not the JSX boolean shorthand) so React actually
+            // writes the allowpopups DOM attribute; cast satisfies React's boolean-typed prop.
+            allowpopups={'true' as unknown as boolean}
             useragent={navigator.userAgent}
             title={tool.name}
             webpreferences="contextIsolation=yes, nodeIntegration=no, nativeWindowOpen=yes, spellcheck=yes"
