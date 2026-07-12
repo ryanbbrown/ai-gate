@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, shell, Menu, Tray, nativeImage, ipcMain, systemPreferences } = require('electron');
+const { app, BrowserWindow, session, shell, Menu, Tray, nativeImage, ipcMain, systemPreferences, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
@@ -84,11 +84,6 @@ const codeKeyLabels = new Map([
   ['Slash', '/'],
   ['Space', 'Space'],
 ]);
-
-/** Returns true when a provider webview should be allowed to open an in-app auth popup. */
-const isProviderAuthPopupUrl = (url: string) => {
-  return /^https:\/\/accounts\.google\.com\//i.test(url);
-};
 
 /** Loads the ESM-only provider context-menu helper from the CommonJS main bundle. */
 const loadProviderContextMenu = async () => {
@@ -766,6 +761,55 @@ function setStoredSettings(settings: any) {
   }
 }
 
+// Persistent allowlist of opener→destination domain pairs the user chose to "Always Allow"
+// for pop-ups. Each entry is keyed "openerHost>destHost". Stored in its own file so the
+// renderer's whole-object set-settings never clobbers it.
+function popupPairKey(openerHost: string, destHost: string): string {
+  return `${openerHost}>${destHost}`;
+}
+
+function getPopupAllowlist(): string[] {
+  try {
+    const allowlistPath = path.join(app.getPath('userData'), 'popup-allowlist.json');
+    if (fs.existsSync(allowlistPath)) {
+      const parsed = JSON.parse(fs.readFileSync(allowlistPath, 'utf8'));
+      if (Array.isArray(parsed)) return parsed.filter((d: any) => typeof d === 'string');
+    }
+  } catch (error) {
+    console.error('Error reading popup allowlist:', error);
+  }
+  return [];
+}
+
+function addPopupAllowlistPair(key: string) {
+  try {
+    const list = getPopupAllowlist();
+    if (!list.includes(key)) {
+      list.push(key);
+      const allowlistPath = path.join(app.getPath('userData'), 'popup-allowlist.json');
+      fs.writeFileSync(allowlistPath, JSON.stringify(list, null, 2));
+    }
+  } catch (error) {
+    console.error('Error writing popup allowlist:', error);
+  }
+}
+
+function clearPopupAllowlist(): number {
+  try {
+    const removed = getPopupAllowlist().length;
+    const allowlistPath = path.join(app.getPath('userData'), 'popup-allowlist.json');
+    if (fs.existsSync(allowlistPath)) fs.unlinkSync(allowlistPath);
+    return removed;
+  } catch (error) {
+    console.error('Error clearing popup allowlist:', error);
+    return 0;
+  }
+}
+
+// IPC handlers for the pop-up allowlist
+ipcMain.handle('get-popup-allowlist-count', () => getPopupAllowlist().length);
+ipcMain.handle('clear-popup-allowlist', () => clearPopupAllowlist());
+
 // IPC handlers for settings
 ipcMain.handle('get-settings', () => {
   return getStoredSettings();
@@ -853,30 +897,82 @@ app.whenReady().then(async () => {
       });
     }
 
-    // For all web contents (including webviews)
-    // Open all window.open() calls in external browser
-    contents.setWindowOpenHandler((details: any) => {
-      const { url } = details;
-      if (contents.getType?.() === 'webview' && isProviderAuthPopupUrl(url)) {
-        return {
-          action: 'allow',
-          overrideBrowserWindowOptions: {
-            width: 520,
-            height: 720,
-            title: 'Sign in',
-            autoHideMenuBar: true,
-            webPreferences: {
-              nodeIntegration: false,
-              contextIsolation: true,
-              nativeWindowOpen: true,
-              partition: 'persist:webtool',
-            },
+    const contentsType = contents.getType?.();
+
+    contents.setWindowOpenHandler(({ url }: { url: string }) => {
+      if (contentsType === 'window') {
+        // Main app window: open externally
+        if (ALLOWED_OPEN_SCHEMES.some(s => url.toLowerCase().startsWith(s))) shell.openExternal(url);
+        return { action: 'deny' };
+      }
+      // webview / OOPIF popups: only http/https open as in-app pop-up windows
+      // (via did-create-window confirmation). Other allowed schemes like mailto:
+      // must go to the OS handler, not a BrowserWindow that can't render them.
+      const lower = url.toLowerCase();
+      if (!lower.startsWith('http:') && !lower.startsWith('https:')) {
+        if (ALLOWED_OPEN_SCHEMES.some(s => lower.startsWith(s))) shell.openExternal(url);
+        return { action: 'deny' };
+      }
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          show: false,
+          width: 520,
+          height: 720,
+          title: 'Sign in',
+          autoHideMenuBar: true,
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            partition: 'persist:webtool',
           },
-        };
+        },
+      };
+    });
+
+    contents.on('did-create-window', (newWin: any, details: any) => {
+      const url = details.url || newWin.webContents?.getURL?.() || '';
+      try { newWin.hide(); } catch {}
+      if (!ALLOWED_OPEN_SCHEMES.some(s => url.toLowerCase().startsWith(s))) {
+        newWin.close();
+        return;
+      }
+      const openerHost = (() => {
+        try { return new URL(contents.getURL?.() || '').hostname; } catch { return ''; }
+      })();
+      const destHost = (() => {
+        try { return new URL(url).hostname; } catch { return ''; }
+      })();
+      const pairKey = (openerHost && destHost) ? popupPairKey(openerHost, destHost) : '';
+
+      // Skip the prompt for opener→destination pairs the user previously chose to always allow.
+      if (pairKey && getPopupAllowlist().includes(pairKey)) {
+        newWin.show();
+        return;
       }
 
-      if (ALLOWED_OPEN_SCHEMES.some(s => url.toLowerCase().startsWith(s))) shell.openExternal(url);
-      return { action: 'deny' };
+      const parent = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : undefined;
+      // Native dialogs don't break long unbroken strings, so hard-wrap the URL with newlines
+      const wrappableUrl = url.replace(/(.{64})/g, '$1\n');
+      const opts = {
+        type: 'question' as const,
+        title: 'Allow pop-up?',
+        message: `${openerHost || 'A page'} wants to open a pop-up window`,
+        detail: `Destination:\n${wrappableUrl}`,
+        buttons: ['Allow', 'Always Allow', 'Decline'],
+        defaultId: 0,
+        cancelId: 2,
+      };
+      (parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts)).then(({ response }: { response: number }) => {
+        if (response === 0) {
+          newWin.show();
+        } else if (response === 1) {
+          if (pairKey) addPopupAllowlistPair(pairKey);
+          newWin.show();
+        } else {
+          newWin.close();
+        }
+      });
     });
   });
 

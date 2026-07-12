@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { Settings, Sun, Moon, Monitor, Save, Keyboard, RotateCcw, Power } from 'lucide-react';
+import { Settings, Sun, Moon, Monitor, Save, Keyboard, RotateCcw, Power, ChevronRight, Trash2 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -46,6 +46,8 @@ export const SettingsPanel = ({ isCollapsed = false }: SettingsPanelProps) => {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'general' | 'shortcuts'>('general');
   const [editingShortcut, setEditingShortcut] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [popupAllowlistCount, setPopupAllowlistCount] = useState<number | null>(null);
   const { settings, updateSettings, setAutostart } = useSettings();
   const { shortcuts, resetAllShortcuts, applyShortcutPreset } = useShortcuts();
   const { tools } = useAITools();
@@ -77,6 +79,38 @@ export const SettingsPanel = ({ isCollapsed = false }: SettingsPanelProps) => {
       ...prev,
       defaultTools: tools
     }));
+  };
+
+  // Load the pop-up allowlist count whenever the settings sheet opens
+  useEffect(() => {
+    if (open) {
+      window.electronAPI?.getPopupAllowlistCount?.()
+        .then(setPopupAllowlistCount)
+        .catch(() => setPopupAllowlistCount(null));
+    } else {
+      setAdvancedOpen(false);
+    }
+  }, [open]);
+
+  const handlePurgePopupAllowlist = async () => {
+    try {
+      const removed = await window.electronAPI?.clearPopupAllowlist?.() ?? 0;
+      setPopupAllowlistCount(0);
+      toast({
+        title: "Pop-up Allowlist Cleared",
+        description: removed > 0
+          ? `Removed ${removed} saved pop-up ${removed === 1 ? 'permission' : 'permissions'}.`
+          : "There were no saved pop-up permissions to remove.",
+        duration: 3000
+      });
+    } catch {
+      toast({
+        title: "Error",
+        description: "Failed to clear the pop-up allowlist.",
+        variant: "destructive",
+        duration: 3000
+      });
+    }
   };
 
   // Apply changes function
@@ -307,8 +341,8 @@ export const SettingsPanel = ({ isCollapsed = false }: SettingsPanelProps) => {
                         await setAutostart(checked);
                         toast({
                           title: checked ? "Autostart Enabled" : "Autostart Disabled",
-                          description: checked 
-                            ? "The app will start automatically with Windows." 
+                          description: checked
+                            ? "The app will start automatically with Windows."
                             : "The app will no longer start automatically with Windows.",
                           duration: 3000
                         });
@@ -323,6 +357,50 @@ export const SettingsPanel = ({ isCollapsed = false }: SettingsPanelProps) => {
                     }}
                   />
                 </div>
+              </div>
+
+              <Separator />
+
+              {/* Advanced (collapsed by default) */}
+              <div className="space-y-4">
+                <button
+                  type="button"
+                  onClick={() => setAdvancedOpen(prev => !prev)}
+                  className="flex items-center w-full text-left"
+                  aria-expanded={advancedOpen ? 'true' : 'false'}
+                >
+                  <ChevronRight
+                    className={`h-4 w-4 mr-1 transition-transform ${advancedOpen ? 'rotate-90' : ''}`}
+                  />
+                  <h3 className="text-sm font-medium">Advanced</h3>
+                </button>
+
+                {advancedOpen && (
+                  <div className="pl-5">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1 pr-4">
+                        <Label>Pop-up allowlist</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Clears the saved “Always Allow” pop-up permissions
+                          {popupAllowlistCount !== null && popupAllowlistCount > 0
+                            ? ` (${popupAllowlistCount} saved).`
+                            : '.'}
+                          {' '}You will be prompted again the next time a page opens a pop-up.
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handlePurgePopupAllowlist}
+                        disabled={popupAllowlistCount === 0}
+                        className="flex items-center gap-2 shrink-0"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Purge
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           ) : (
