@@ -2,6 +2,7 @@ const { app, BrowserWindow, session, shell, Menu, Tray, nativeImage, ipcMain, sy
 const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
+const { normalizeTrayIcon } = require('./trayIcon');
 
 const isDevelopment = !app.isPackaged;
 const isE2E = process.env.AI_GATE_E2E === '1';
@@ -666,15 +667,17 @@ function createTray() {
     icon = nativeImage.createFromBuffer(buffer, { width: size, height: size });
   }
   
+  const trayIcon = normalizeTrayIcon(icon);
+
   // Create the tray
-  tray = new Tray(icon);
+  tray = new Tray(trayIcon);
   
   // Force set the image again to ensure it's properly loaded
-  tray.setImage(icon);
+  tray.setImage(trayIcon);
   
   // Add some debugging
-  console.log('Tray created with icon size:', icon.getSize());
-  console.log('Tray icon is empty:', icon.isEmpty());
+  console.log('Tray created with icon size:', trayIcon.getSize());
+  console.log('Tray icon is empty:', trayIcon.isEmpty());
 
   // Create context menu for the tray
   const contextMenu = Menu.buildFromTemplate([
